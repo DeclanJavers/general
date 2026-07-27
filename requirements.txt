@@ -1,0 +1,8 @@
+numpy
+requests
+pyyaml
+pydantic
+claude-agent-sdk
+streamlit
+pandas
+pytest

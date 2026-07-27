@@ -1,0 +1,49 @@
+# Pre-registration. Committing a change to this file bumps a version and is
+# the versioning mechanism (doc §2.10, §3). Do not tune mid-sample.
+
+harness_version: h1.0.0        # forecaster config identity (prompt/ensemble/sources)
+decision_version: d1.0.0       # decision-layer identity (thresholds/kelly/shrink)
+
+vertical: rules_resolved       # Tier-1: document/rules-resolved markets (doc §2.2)
+venue: kalshi                  # primary venue; manifold = integration testbed
+
+# Pre-registered experiment (doc §3, Appendix A):
+min_edge_nats: 0.05            # minimum edge of interest, Δ*
+target_n_clusters: 400         # decision point (80% power at Δ*=0.05, κ≈1-3)
+
+selection:
+  categories_exclude: [fed, cpi, elections_top, sports_main, crypto_price, mve]
+  max_spread: 0.05             # tradability cap (practitioner-validated)
+  min_book_sides: 2            # require two-sided book
+  max_days_to_resolution: 90
+  min_days_to_resolution: 0
+  theta_hurdle_annual: 0.05    # settlement-discount hurdle (Kalshi ~halved by APY)
+  shortlist_size: 25           # cost lever: harness runs only on survivors
+
+forecaster:
+  models: [opus, opus, sonnet] # Claude SDK ensemble members (isolated sessions)
+  other_models: []             # non-Claude members via plain API (optional)
+  cap: [0.03, 0.97]            # output cap (tournament evidence)
+  max_turns: 25
+  max_budget_usd: 0.40         # per member
+  trim: 1                      # members trimmed from each tail before mean
+
+decision:
+  kelly_fraction: 0.25
+  shrink_to_market: 0.5        # weight on q in shrunk belief
+  maker_edge: 0.015            # min edge past posted price, prob points
+  taker_edge: 0.03             # min edge past touch, prob points
+  min_longshot_price: 0.10     # never take sub-10c longshots (side-of-bias gate)
+  per_market_cap: 0.02         # max bankroll fraction per market
+  per_cluster_cap: 0.05        # max worst-case per underlying event
+  daily_loss_kill: 0.10        # kill switch
+
+execution:
+  depth_cap: 0.25              # max fraction of displayed depth we assume fillable
+  adverse_fill_haircut: 0.4    # maker fill prob when market moves our way
+  staleness_seconds: 60        # evaluate entry against book this much later
+
+run:
+  max_run_cost_usd: 10.0       # loud halt if a single run exceeds this
+  db_path: data/forecasts.db
+  raw_cache_dir: data/raw
