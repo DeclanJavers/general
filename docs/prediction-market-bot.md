@@ -1,10 +1,10 @@
-# Prediction-Market Forecasting Bot — Design & Build Doc (v2, evidence-revised)
+# Prediction-Market Forecasting Bot — Design & Build Doc (v2.1, evidence-revised, Claude Agent SDK build)
 
 > **Thesis in one line:** you are not building a model that predicts outcomes. You are building a *disagreement detector with a track record* — something that identifies where the market price is wrong, in corners where sharp money isn't looking, and proves out-of-sample that it's right when it disagrees.
 >
 > **v2 amendment:** the evidence says the surviving version of this thesis is narrower: a **rules-literate, maker-side, breadth-over-depth** operation on fast-resolving document-resolved markets — because per-market capacity is tiny, taker execution is where retail money dies, and the single most consistently attested repeatable edge is reading resolution criteria that other traders don't.
 
-This document is the full plan: every component, how to build it, how to improve it, how to watch it in a web dashboard, plus a self-contained math appendix, minimal code scaffolds, and the evidence base (Appendix D) behind every major design decision. v2 incorporates a six-track research review (venues/APIs, LLM forecasting evidence, market-efficiency evidence, execution microstructure, evaluation statistics, project postmortems) conducted 2026-07-27.
+This document is the full plan: every component, how to build it, how to improve it, how to watch it in a web dashboard, plus a self-contained math appendix, minimal code scaffolds, and the evidence base (Appendix D) behind every major design decision. v2 incorporates a six-track research review (venues/APIs, LLM forecasting evidence, market-efficiency evidence, execution microstructure, evaluation statistics, project postmortems) conducted 2026-07-27. v2.1 specifies the **Claude Agent SDK** (`claude-agent-sdk`) as the harness runtime — see the implementation map in §1 — which turns two of the plan's guardrails (price-blindness, output-format validation) from discipline into mechanism.
 
 ---
 
@@ -67,7 +67,7 @@ The six-track research review (full findings in Appendix D) forced these revisio
 7. **Theta is priced.** Prices embed a ~3–7% annualized settlement discount; 48–88% of apparent long-horizon "miscalibration" is just that. Kalshi pays ~4% APY on cash *and open positions*, largely neutralizing it there. → Theta gate in selection; prefer <60–90 days to resolution (§2.2).
 8. **The harness recipe is now evidence-ranked, not folklore:** frontier base model > agentic multi-source retrieval > cross-family ensemble of 6–8 (trimmed mean) > explicit base rates > output capping ~[0.03, 0.97] > Platt recalibration later. LLMs are *under*-extreme (hug 50%), not overconfident. Fine-tuning: skip. (§2.3, D.2)
 9. **Ops kill projects, not models.** Silent retrieval failures → hallucinated forecasts; format/units bugs cost tournament winners whole seasons; "make sure it runs all the time" is the most-cited advice. → Retrieval health assertions, format validation, and run-health observability are first-class (§2.3, §4).
-10. **Don't build the plumbing from scratch.** Metaculus `forecasting-tools`/`metac-bot-template` is maintained (July 2026), battle-tested, and free; Polymarket's official `agents` repo is an archived graveyard. → Build on the former; ignore the latter (§2.3, D.6).
+10. **Don't build the plumbing from scratch.** Metaculus `forecasting-tools`/`metac-bot-template` is maintained (July 2026), battle-tested, and free; Polymarket's official `agents` repo is an archived graveyard. → v2.1: the agentic research loop comes from the Claude Agent SDK (§1 map); `forecasting-tools` covers Metaculus plumbing and non-Claude ensemble members; the archived repo stays ignored (§2.3, D.6).
 11. **Venue facts (live-verified):** Kalshi REST market data needs no auth, books are full-depth, rules text is inline — but you must pass `mve_filter=exclude` or 99.3% of the "universe" is auto-generated parlay legs; 78.5% of quoted markets had zero 24h volume (the thin tail is *very* thin). Polymarket international is read-only for US persons (ToS); Gamma pagination is quirky (keyset only past 5k offset) and its prices are stale vs the CLOB. Fees on both venues are now per-category/per-series and changed twice in six months — pull them from the API, never hard-code. Manifold is the only venue where the full loop (order → resolution) can legally run today, so it's the integration testbed, nothing more. (§2.1, D.1)
 
 ---
@@ -120,7 +120,7 @@ The six-track research review (full findings in Appendix D) forced these revisio
 bot/
   connectors.py     # 2.1  fetch markets, books, fee params, resolutions
   select.py         # 2.2  the funnel
-  forecast.py       # 2.3  the harness (blind; wraps forecasting-tools)
+  forecast.py       # 2.3  the harness (blind; Claude Agent SDK agents + non-Claude members)
   decide.py         # 2.4  edge thresholds + maker/taker posture + sizing
   execute.py        # 2.5  fill simulation (trade-through), paper portfolio, markouts
   log.py            # 2.6  append-only writes over SQLite
@@ -135,6 +135,25 @@ data/raw/           # cached raw API responses (replayable)
 ```
 
 Keep each module small. The dashboard reads the same SQLite file the pipeline writes.
+
+### Claude Agent SDK implementation map
+
+The harness and its guardrails are specified against the **Claude Agent SDK** (`pip install claude-agent-sdk`; docs at code.claude.com/docs/en/agent-sdk). The pipeline itself stays plain Python — the SDK appears only inside `forecast.py`. What each design requirement maps to:
+
+| Design requirement | SDK mechanism |
+|---|---|
+| Blind, isolated ensemble members | independent `query()` calls — each is a fresh session with no shared context; parallelize with `asyncio.gather` |
+| Price-blindness enforcement (§2.3) | `PreToolUse` hook on `WebSearch`/`WebFetch` returning `permissionDecision: "deny"` for blocklisted domains — mechanical, not aspirational |
+| Contamination scan (§2.3) | `PostToolUse` hook scanning fetched content for price-like mentions of the market → sets the `contaminated` log flag |
+| Agentic multi-step research | built-in `WebSearch` + `WebFetch` tools; `allowed_tools` restricted to exactly these plus the custom MCP tools |
+| Safe internal data access | in-process MCP server (`create_sdk_mcp_server` + `@tool`) exposing the cached resolution-criteria / primary-doc fetchers — never price fields |
+| Validated output contract (§2.3) | `output_format={"type": "json_schema", ...}` with a pydantic schema; `error_max_structured_output_retries` handled as a dropped member — kills the format-bug failure mode (D.2) mechanically |
+| Headless runs, no permission prompts | `permission_mode="dontAsk"` + explicit `allowed_tools` |
+| Runaway protection | `max_turns` + `max_budget_usd` per member |
+| Cost logging (§4 panels) | `ResultMessage.total_cost_usd` + `usage` per member, written to the log |
+| Cross-family ensemble (D.2) | the SDK drives Claude models only (`model="opus"`, `"sonnet"`, …); non-Claude members run as plain API calls (e.g., via litellm / `forecasting-tools`' GeneralLlm) behind the same `forecast()` contract |
+
+Two consequences worth naming. First, `forecasting-tools` keeps a narrower role than the v2 draft gave it: Metaculus tournament plumbing (if entering FutureEval) and the wrapper for non-Claude ensemble members — the agentic research loop itself comes from the Agent SDK. Second, **billing**: the SDK requires `ANTHROPIC_API_KEY`; Claude-subscription (Claude Code login) auth is not supported for SDK automation, so automated harness runs are metered API usage. At the evidence-based operating point (~$1–1.50/question, D.6) this is low-hundreds-per-quarter money, capped per-forecast by `max_budget_usd` and per-run by the orchestrator.
 
 ---
 
@@ -196,19 +215,19 @@ Output: a ranked shortlist of candidate markets with their criteria, book, fee p
 **Build.** The recipe below is evidence-ranked from tournament results and ablations (D.2) — in descending order of measured impact:
 
 - **Frontier base model first.** Model choice dominates scaffolding: a plain template bot on the best reasoning model beat ~94 custom bots in Q2 2025; prompting cannot rescue weaker models. Re-benchmark model choice quarterly. Scaffolding on top of a frontier model is still worth ~5–11 peer-score points (≈9 months of model progress).
-- **Scaffold on `forecasting-tools` / `metac-bot-template`** (actively maintained, July 2026). The question-plumbing and format-validation bugs it has already fixed have cost other builders entire seasons. Do not rebuild plumbing.
+- **Build each member on the Claude Agent SDK** (implementation map in §1): one independent `query()` per ensemble member — fresh session, no shared context — with `allowed_tools` restricted to `WebSearch`, `WebFetch`, and the internal MCP tools; `permission_mode="dontAsk"` for headless runs; a JSON-schema `output_format` enforcing the output contract; `max_turns`/`max_budget_usd` as runaway guards. Structured-output validation is first-class in the SDK, which mechanically retires the format/units failure mode that cost tournament builders whole seasons (D.2). Keep `forecasting-tools` for Metaculus tournament plumbing and as the wrapper for non-Claude ensemble members — don't rebuild either.
 - **Agentic multi-source retrieval** — the largest single component win (ablations: ~0.027 Brier; removing search degrades ~3.6×). Iterative search beats one-shot; ≥2 distinct providers correlates with winning (r=0.42); no single provider is consistently superior. Retrieve primary sources the crowd skims — the statute, docket, filing, launch manifest, calendar, changelog.
-  - **Price-blindness enforcement lives here:** domain blocklist (kalshi.com, polymarket.com, manifold.markets, electionbettingodds, aggregator/odds sites) + a post-hoc scan of retrieved context for price-like mentions of this market; hits set a `contaminated` flag in the log.
+  - **Price-blindness enforcement lives here, mechanically:** an SDK `PreToolUse` hook denies any `WebSearch`/`WebFetch` call touching blocklisted domains (kalshi.com, polymarket.com, manifold.markets, electionbettingodds, aggregator/odds sites), and a `PostToolUse` hook scans fetched content for price-like mentions of this market; hits set the `contaminated` flag in the log. The forecaster cannot see a price even if it tries.
   - **Retrieval health is a first-class failure surface:** assert non-empty results, log every source, and cap confidence when retrieval is thin — one silently-failed feed produced fully hallucinated forecasts in a documented build (D.6).
 - **Resolution-criteria interpretation pass (new, first-class).** Before forecasting: restate the resolution rule in own words, name the authoritative source, enumerate edge cases (timezone, "by" vs "before", what happens on a technicality), state the default resolution if nothing changes by the deadline, and check the question isn't already effectively resolved. Misreading criteria/status is the top documented LLM-forecaster failure mode — and the fine print is also where the edge thesis lives, so this pass is both defense and offense. Log its output separately so interpretation errors are auditable apart from forecasting errors.
 - **Reasoning decomposition:** rephrase question → **explicit base rate / outside view** (winners compute base rates 40% vs 7% of losers) → inside view from retrieved news → pro/con weighing → probability. Batch logically related questions into one call for scope-coherence (bot medians otherwise violate probability sums by ~24%).
-- **Ensemble: 6–8 samples across 2–3 model families, trimmed mean.** 86% of tournament winners ensemble; cross-family decorrelation beats more samples of one model; same-model multi-persona ensembles showed little gain. Log per-member forecasts and the spread.
+- **Ensemble: 6–8 samples across 2–3 model families, trimmed mean.** 86% of tournament winners ensemble; cross-family decorrelation beats more samples of one model; same-model multi-persona ensembles showed little gain. Claude members run as isolated SDK sessions (genuine decorrelation — no shared context); non-Claude members run behind the same `forecast()` contract via plain API calls, since the SDK drives Claude models only. Log per-member forecasts and the spread.
 - **Cap outputs to ~[0.03, 0.97]** (capping correlated r=+0.48 with winning; one confident wrong forecast can erase a season). Note the tension: in longshot-heavy niches some edge lives outside the cap — revisit per-category once calibration data exists, but start capped.
 - **Expect under-extremeness, not overconfidence.** The documented aggregate miscalibration of LLM forecasters is hugging 50% (bots' yes/no separation ~21pp vs pros' 36pp). The eventual recalibration direction is *extremizing* — see §3.
 - **Skip fine-tuning.** Measured gain small (~0.007 Brier); only 1 of 13 tournament winners fine-tuned; RL fine-tunes of open models reach prior-generation parity only.
 - **Format validation everywhere.** Units bugs and missed questions caused the largest single documented losses. Validate the output contract mechanically.
 - **Output contract:** `{p, rationale, sources, criteria_interpretation, ensemble_members, retrieval_health}`.
-- **Cost envelope:** winners' operating point is ~20–30 LLM calls ≈ $1–1.50/question; a serious quarter costs low hundreds to ~$2k, not $100k (D.6). Run in Claude Code on subscription to subsidize; keep `ANTHROPIC_API_KEY` unset so it draws on the subscription; watch the shared caps — ensemble size is the natural cost knob.
+- **Cost envelope:** winners' operating point is ~20–30 LLM calls ≈ $1–1.50/question; a serious quarter costs low hundreds to ~$2k, not $100k (D.6). **Billing note (v2.1):** the Agent SDK requires `ANTHROPIC_API_KEY` — subscription auth is not supported for SDK automation — so automated harness runs are metered API. Cap each member with `max_budget_usd`, log `total_cost_usd` per member, and treat ensemble size as the cost knob. Interactive development still happens in Claude Code on subscription; only the automated harness bills the API.
 
 **Improvement loop.** Changes are versioned, but compared by **concurrent paired A/B on the same questions** (§3) — not sequential clock-resets: prompt/decomposition wording; ensemble size and family mix; research source mix; post-hoc recalibration (validated by replay, §3).
 
@@ -313,7 +332,7 @@ Output: a ranked shortlist of candidate markets with their criteria, book, fee p
 
 **Build.** Log alongside every real forecast:
 - **Market baseline:** `baseline_p = q` ("do nothing / trust the price").
-- **No-research baseline:** a single one-shot call to the same frontier model, no retrieval. **This is a serious contender, not a strawman** — base-model quality dominates scaffolding (D.2), so this baseline isolates exactly what the expensive retrieval+ensemble machinery adds.
+- **No-research baseline:** a single one-shot call to the same frontier model with retrieval disabled — an SDK `query()` with `allowed_tools=[]` and the same output schema, so it differs from the harness in exactly one respect. **This is a serious contender, not a strawman** — base-model quality dominates scaffolding (D.2), so this baseline isolates exactly what the expensive retrieval+ensemble machinery adds.
 Score both through the same evaluator.
 
 **Improvement loop.** The baseline ablation (§3): the harness must beat both baselines on Δ_log, out of sample, by a margin that clears its own cost. If it only ties the market baseline, there is no tradeable edge. If it only ties the no-research baseline, delete the machinery and keep the model call.
@@ -330,7 +349,7 @@ Score both through the same evaluator.
 - A runner that: ingest → select → forecast → decide → sim → log, on a schedule (or manually at first).
 - A **frozen `config.yaml`** = your pre-registration: pinned harness version, vertical, thresholds, Kelly fraction, **minimum edge of interest and its target N (from the power table)**. Committing a change bumps a version.
 - Reliability engineering is not overhead — "make sure the thing runs all the time" is the most-repeated advice from tournament survivors (D.6): retries, idempotent runs, loud failures, and a heartbeat the dashboard shows.
-- Note: fully autonomous, unattended runs may fall under separate subscription terms than interactive Claude Code use — run it semi-interactively for now (you kick it off).
+- The runner is plain Python (asyncio); the SDK appears only inside `forecast.py`. Automated harness runs bill the API key (the SDK doesn't support subscription auth), so the runner enforces a per-run budget from `config.yaml` on top of the per-member `max_budget_usd`, and halts loudly when it's hit.
 
 **Improvement loop.** The outer scientific loop (§3) is what the runner + config make real.
 
@@ -449,7 +468,7 @@ The dashboard can only show what you logged. The Appendix B schema is designed s
 The evaluation engine and append-only log come *first* (the most-cited killer is not knowing whether anything helped). Then: Kalshi connector (with `mve_filter=exclude` and per-series fees), the selection funnel for one Tier-1 vertical (verify the throughput gate against real market flow before committing), settlement polling, and the market baseline (`p = q`). No harness yet. Goal: markets flow in, get filtered, logged, settled, and *scored end-to-end on the baseline*. Prove the loop closes.
 
 **Phase 1 — harness + decision + sim (paper, forward).**
-Blind forecaster on the `forecasting-tools` scaffold (with the no-research baseline logged alongside), criteria-interpretation pass, decision layer (maker-first), trade-through fill sim with markout logging. Pre-register: minimum edge of interest Δ* (recommended 0.05 nats), target N from the power table, thresholds, Kelly fraction. Run forward.
+Blind forecaster on the Agent SDK (§1 implementation map; `forecasting-tools` only for tournament plumbing and non-Claude members), with the no-research baseline logged alongside, criteria-interpretation pass, decision layer (maker-first), trade-through fill sim with markout logging. Pre-register: minimum edge of interest Δ* (recommended 0.05 nats), target N from the power table, thresholds, Kelly fraction. Run forward.
 *Optional but recommended:* enter the current Metaculus FutureEval season with the same harness — free scoring signal at zero capital risk, remembering its objective differs from trading EV.
 *Gate:* pipeline runs unattended-reliably; first ~30–50 cluster resolutions in; scoring verified correct; retrieval-health and contamination rates acceptable.
 
@@ -704,17 +723,75 @@ def eb_shrink(deltas, ses):
     return mu + tau2/(tau2 + ses**2) * (deltas - mu)
 ```
 
-### Forecaster interface (blind to q)
+### Forecaster harness (Claude Agent SDK; blind to q)
 
 ```python
-def forecast(question, resolution_criteria, context) -> dict:
-    """Return {'p': float, 'rationale': str, 'sources': list,
-               'criteria_interp': str, 'ensemble_members': list,
-               'retrieval_ok': bool, 'contaminated': bool}.
-    MUST NOT receive q or any market price; research layer enforces the
-    domain blocklist and runs the contamination scan. Ensemble (6-8 samples,
-    2-3 model families, trimmed mean) + cap happen inside."""
-    ...
+import asyncio
+from pydantic import BaseModel
+from claude_agent_sdk import (query, ClaudeAgentOptions, ResultMessage,
+                              HookMatcher, tool, create_sdk_mcp_server)
+
+class Forecast(BaseModel):
+    p: float                       # (0,1), pre-cap
+    rationale: str
+    sources: list[str]
+    criteria_interp: str           # resolution-criteria interpretation pass (§2.3)
+
+BLOCKED = ("kalshi", "polymarket", "manifold", "electionbettingodds",
+           "predictit", "betfair", "metaculus", "odds")
+
+async def deny_price_domains(input_data, tool_use_id, context):
+    """PreToolUse hook: mechanical price-blindness (the cardinal-sin guard)."""
+    ti = input_data.get("tool_input", {})
+    text = (ti.get("query") or ti.get("url") or "").lower()
+    if any(d in text for d in BLOCKED):
+        return {"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "price-blindness blocklist"}}
+    return {}
+
+@tool("get_resolution_criteria",
+      "Official resolution criteria text for a market", {"market_id": str})
+async def get_criteria(args):
+    text = load_cached_criteria(args["market_id"])   # from data/raw; never price fields
+    return {"content": [{"type": "text", "text": text}]}
+
+internal = create_sdk_mcp_server(name="marketdb", version="1.0.0",
+                                 tools=[get_criteria])
+
+def member_options(model):
+    return ClaudeAgentOptions(
+        model=model,                        # "opus" | "sonnet" | ... (Claude only)
+        allowed_tools=["WebSearch", "WebFetch",
+                       "mcp__marketdb__get_resolution_criteria"],
+        permission_mode="dontAsk",          # headless, no permission prompts
+        max_turns=25, max_budget_usd=0.40,  # runaway guards
+        hooks={"PreToolUse": [HookMatcher(matcher="WebSearch|WebFetch",
+                                          hooks=[deny_price_domains])]},
+        mcp_servers={"marketdb": internal},
+        output_format={"type": "json_schema",
+                       "schema": Forecast.model_json_schema()},
+        system_prompt=FORECASTER_PROMPT,    # decomposition recipe from §2.3
+    )
+
+async def forecast_member(question_prompt, model):
+    async for msg in query(prompt=question_prompt, options=member_options(model)):
+        if isinstance(msg, ResultMessage):
+            if msg.subtype == "success" and msg.structured_output:
+                f = Forecast.model_validate(msg.structured_output)
+                return f, msg.total_cost_usd
+            return None, msg.total_cost_usd  # format-failed member: drop + log
+
+async def forecast(question, resolution_criteria, context):
+    """Ensemble: isolated SDK sessions (Claude members) + non-Claude members via
+    plain API calls behind the same contract. Trimmed mean + cap + retrieval_ok /
+    contaminated flags applied in the aggregator. MUST NOT receive q."""
+    prompt = render_prompt(question, resolution_criteria, context)   # never q
+    claude = [forecast_member(prompt, m) for m in ("opus", "opus", "sonnet")]
+    others = [forecast_via_api(prompt, m) for m in OTHER_FAMILY_MODELS]
+    members = await asyncio.gather(*claude, *others)
+    return aggregate_trimmed(members)
 ```
 
 ### Decision + fill sim (maker-first)
@@ -772,7 +849,7 @@ def sim_fill_maker(order_price, side, size, prints_after, market_drift):
 
 **Research anchors.** Halawi et al., *Approaching Human-Level Forecasting with Language Models* (arXiv 2402.18563) — retrieval mattered most (ablations); honest headline: *approached*, did not beat, the crowd. Paleka et al., *Pitfalls in Evaluating Language Model Forecasters* (arXiv 2506.00723) — why backtests lie. Bürgi, Deng & Whelan, *Makers and Takers* (Kalshi microstructure; the maker/taker and longshot numbers). Tetlock 2008 (liquidity ≠ efficiency). *When Certainty Is Not Worth It* (arXiv 2605.31431) — priced settlement discounts. Niculescu-Mizil & Caruana 2005 (recalibration sample sizes). Cameron & Miller 2015 (cluster inference). Waudby-Smith/Ramdas line (anytime-valid inference).
 
-**Build / community.** Metaculus `forecasting-tools` + `metac-bot-template` (the scaffold; actively maintained). Metaculus AIB/FutureEval quarterly postmortems on LessWrong (the richest technique evidence). FutureSearch's Kalshi trader case study + live dashboard (the closest existing operation to this design — study their fill rates). faintsignals.substack.com "Building an AI Prediction Bot" (honest solo build log; note it stalled on exactly the iteration-signal problem §3 solves). Sempere, *AI Forecasting in 2026: What 11 Analyses Say* (synthesis).
+**Build / community.** Claude Agent SDK docs (code.claude.com/docs/en/agent-sdk — the harness runtime: python API, hooks, custom tools/MCP, structured outputs, sessions, subagents, cost tracking). Metaculus `forecasting-tools` + `metac-bot-template` (tournament plumbing + non-Claude member wrapper; actively maintained). Metaculus AIB/FutureEval quarterly postmortems on LessWrong (the richest technique evidence). FutureSearch's Kalshi trader case study + live dashboard (the closest existing operation to this design — study their fill rates). faintsignals.substack.com "Building an AI Prediction Bot" (honest solo build log; note it stalled on exactly the iteration-signal problem §3 solves). Sempere, *AI Forecasting in 2026: What 11 Analyses Say* (synthesis).
 
 **Critical writing.** Nuño Sempere's incentive/alignment critiques of forecasting platforms (arXiv 2106.11248) — why tournament rank ≠ trading EV. Halawi's *Contra papers claiming superhuman AI forecasting*.
 
