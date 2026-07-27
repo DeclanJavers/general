@@ -33,9 +33,12 @@ _EXCLUDE = {
     "elections_top": (("election",),
                       r"presidential election|win the presidency|next president"
                       r"|electoral college|control of the (?:senate|house)"),
-    "sports_main": (("sports",),
+    "sports_main": (("sports", "mlb", "nba", "nfl", "nhl", "ncaa", "atp", "wta",
+                     "ufc", "epl", "laliga", "seriea", "tennis", "soccer", "golf",
+                     "pga", "f1race", "nascar"),
                     r"super bowl|world series|world cup|premier league"
-                    r"|\b(?:nfl|nba|mlb|nhl)\b"),
+                    r"|\b(?:nfl|nba|mlb|nhl|ufc|atp|wta)\b"
+                    r"|wins? by over|total (?:runs|points|goals)\??$"),
     "crypto_price": (("crypto",),
                      r"(?:bitcoin|btc|ethereum|eth|solana|dogecoin)\s+"
                      r"(?:price|above|below|reach|hit)"
@@ -91,8 +94,22 @@ def days_to_resolution(m: Market, now: datetime | None = None) -> float | None:
     return (dt - _now(now)).total_seconds() / 86400.0
 
 
+_LADDER_ID_RE = re.compile(r"-[TB]\d+\.\d+$")  # price-ladder legs (…-T82.69);
+# integer -T3 suffixes are count thresholds and stay eligible
+_LADDER_Q_RE = re.compile(
+    r"\b(price|close|closing|trade|trading|settle)\b.{0,40}\b(above|below|between|"
+    r"higher|lower|at least)\b|\b(above|below)\s*\$?\d")
+
+
 def vertical_ok(m: Market, categories_exclude: list[str]) -> bool:
-    """Drop excluded categories, matching category string AND question text."""
+    """Drop excluded categories, matching category string AND question text.
+
+    Also drops price-level ladder markets (WTI/BTC/index hourly thresholds):
+    the doc's anti-efficiency gate names crypto price levels, and commodity /
+    index ladders are the same bot-saturated, zero-edge family (doc D.3).
+    """
+    if _LADDER_ID_RE.search(m.market_id) or _LADDER_Q_RE.search(m.question.lower()):
+        return False
     cat, q = m.category.lower(), m.question.lower()
     for token in categories_exclude:
         cats, pat = _EXCLUDE.get(token, ((token.replace("_", " "),), r"$^"))
@@ -134,7 +151,13 @@ def time_ok(m: Market, cfg: dict, now: datetime | None = None) -> bool:
 
 
 def liquidity_ok(m: Market, cfg: dict) -> bool:
-    """Two-sided book, spread <= cap, nonzero displayed depth both sides."""
+    """Two-sided book, spread <= cap, nonzero displayed depth both sides.
+
+    Listing endpoints report top-of-book prices without quantities (all-zero
+    qty); depth is unknown there, so the depth check applies only when the
+    book carries any quantity. Real depth is enforced downstream at decision
+    time (decide() on the fresh book, depth caps in the fill sim).
+    """
     b = m.book
     if b is None:
         return False
@@ -143,6 +166,8 @@ def liquidity_ok(m: Market, cfg: dict) -> bool:
         return False
     if b.spread is None or b.spread > cfg.get("max_spread", 0.05):
         return False
+    if b.depth("bid") == 0 and b.depth("ask") == 0:
+        return True  # price-only listing book: depth unknown, defer to decision time
     return b.depth("bid") > 0 and b.depth("ask") > 0
 
 
