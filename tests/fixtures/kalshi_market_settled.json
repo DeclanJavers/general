@@ -1,0 +1,11 @@
+{
+  "market": {
+    "ticker": "KXFED-26SEP-T3.75",
+    "event_ticker": "KXFED-26SEP",
+    "title": "Will the Fed funds target rate be above 3.75% after the September 2026 meeting?",
+    "status": "settled",
+    "result": "yes",
+    "settled_time": "2026-09-18T01:12:44Z",
+    "close_time": "2026-09-17T18:00:00Z"
+  }
+}

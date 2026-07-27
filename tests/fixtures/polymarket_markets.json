@@ -1,0 +1,39 @@
+[
+  {
+    "id": "500012",
+    "question": "Will the appropriations bill pass before August 1, 2026?",
+    "description": "This market will resolve to Yes if the bill is signed into law before 12:00 PM ET on August 1, 2026, per the Congressional Record.",
+    "category": "Politics",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.72\", \"0.28\"]",
+    "clobTokenIds": "[\"71321045679252212594626385532706912750332728571942532289631379312455583992563\", \"11015470973684177829729219287262166995141465048508201953575582100565462316088\"]",
+    "bestBid": 0.71,
+    "bestAsk": 0.74,
+    "volume24hr": "15234.5",
+    "openInterest": "88210.0",
+    "endDate": "2026-08-01T16:00:00Z",
+    "closed": false
+  },
+  {
+    "id": "500013",
+    "question": "Which direction does the index move this week?",
+    "description": "Non-binary market that must be skipped.",
+    "outcomes": "[\"Up\", \"Down\"]",
+    "outcomePrices": "[\"0.5\", \"0.5\"]",
+    "endDate": "2026-08-01T16:00:00Z",
+    "closed": false
+  },
+  {
+    "id": "500014",
+    "question": "Market with malformed encoded prices?",
+    "description": "outcomePrices is not valid JSON; bid/ask arrive as strings.",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "not-json",
+    "clobTokenIds": "[\"222\", \"333\"]",
+    "bestBid": "0.10",
+    "bestAsk": "0.13",
+    "volume24hr": null,
+    "endDate": "2026-09-15T00:00:00Z",
+    "closed": false
+  }
+]

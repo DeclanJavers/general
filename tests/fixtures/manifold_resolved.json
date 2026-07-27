@@ -1,0 +1,9 @@
+{
+  "id": "mf9res",
+  "question": "Did the bill pass before July 2026?",
+  "outcomeType": "BINARY",
+  "isResolved": true,
+  "resolution": "YES",
+  "resolutionTime": 1751500000000,
+  "resolutionProbability": null
+}

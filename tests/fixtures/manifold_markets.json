@@ -1,0 +1,38 @@
+[
+  {
+    "id": "mf1abc",
+    "question": "Will LibreWidget 2.0 ship before September 1, 2026?",
+    "outcomeType": "BINARY",
+    "probability": 0.62,
+    "totalLiquidity": 400,
+    "closeTime": 4102444800000,
+    "volume24Hours": 123.4,
+    "isResolved": false
+  },
+  {
+    "id": "mf2mc",
+    "question": "Which team wins the 2026 finals?",
+    "outcomeType": "MULTIPLE_CHOICE",
+    "closeTime": 4102444800000,
+    "isResolved": false
+  },
+  {
+    "id": "mf3tiny",
+    "question": "Tiny market nobody funded?",
+    "outcomeType": "BINARY",
+    "probability": 0.5,
+    "totalLiquidity": 5,
+    "closeTime": 4102444800000,
+    "volume24Hours": 0,
+    "isResolved": false
+  },
+  {
+    "id": "mf4done",
+    "question": "Already resolved market?",
+    "outcomeType": "BINARY",
+    "probability": 0.99,
+    "totalLiquidity": 300,
+    "closeTime": 1600000000000,
+    "isResolved": true
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "markets": [
+    {
+      "ticker": "KXFED-26SEP-T3.75",
+      "event_ticker": "KXFED-26SEP",
+      "title": "Will the Fed funds target rate be above 3.75% after the September 2026 meeting?",
+      "status": "open",
+      "rules_primary": "If the upper bound of the federal funds target range is above 3.75% at settlement, the market resolves Yes.",
+      "rules_secondary": "The source agency for this market is the Federal Reserve. Settlement uses the target range published after the FOMC meeting.",
+      "close_time": "2026-09-17T18:00:00Z",
+      "expected_expiration_time": "2026-09-18T00:00:00Z",
+      "yes_bid": 0,
+      "yes_ask": 0,
+      "yes_bid_dollars": "0.37",
+      "yes_ask_dollars": "0.41",
+      "liquidity": 0,
+      "volume_24h": 1220,
+      "open_interest": 4500
+    },
+    {
+      "ticker": "KXOSCARPIC-27-DUNE3",
+      "event_ticker": "KXOSCARPIC-27",
+      "title": "Will Dune: Part Three win Best Picture at the 2027 Oscars?",
+      "status": "open",
+      "rules_primary": "If Dune: Part Three wins the Academy Award for Best Picture at the 99th Academy Awards, the market resolves Yes.",
+      "rules_secondary": "",
+      "close_time": "2027-03-05T00:00:00Z",
+      "expiration_time": "2027-03-08T00:00:00Z",
+      "yes_bid": 12,
+      "yes_ask": 15,
+      "taker_fee_rate": 0.035,
+      "maker_fee_rate": 0.0,
+      "volume_24h": 40,
+      "open_interest": 310
+    },
+    {
+      "event_ticker": "KXBROKEN-26",
+      "yes_bid": "not-a-number"
+    }
+  ],
+  "cursor": ""
+}

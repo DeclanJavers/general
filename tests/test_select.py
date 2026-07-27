@@ -217,6 +217,8 @@ def test_settle_open(tmp_path, monkeypatch):
     stub = types.ModuleType("bot.connectors")
     stub.get_resolution = lambda venue, mid: resolutions.get(mid)
     monkeypatch.setitem(sys.modules, "bot.connectors", stub)
+    import bot
+    monkeypatch.setattr(bot, "connectors", stub, raising=False)
 
     summary = settle.settle_open(con, {})
     assert summary["checked"] == 4
